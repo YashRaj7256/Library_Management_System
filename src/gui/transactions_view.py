@@ -1,5 +1,6 @@
 """
 Modern Transactions View built with CustomTkinter.
+Features full Merit System integration, live patron checking, loan renewals, and digital receipts.
 """
 from datetime import datetime
 import tkinter as tk
@@ -11,9 +12,11 @@ from ..database import LibraryDatabase
 from ..models import (
     DEFAULT_FINE_PER_DAY,
     DEFAULT_LOAN_DAYS,
+    INITIAL_MERIT_SCORE,
     STATUS_AVAILABLE,
     TRANS_STATUS_ISSUED,
     TRANS_STATUS_RETURNED,
+    get_merit_tier,
 )
 from .styles import (
     COLOR_DANGER,
@@ -23,9 +26,11 @@ from .styles import (
     COLOR_SUCCESS_HOVER,
     FONT_BODY,
     FONT_BODY_BOLD,
+    FONT_MONO,
     FONT_SECTION,
     FONT_SMALL,
     FONT_SUBTITLE,
+    apply_treeview_row_tags,
 )
 
 
@@ -37,6 +42,7 @@ class TransactionsView(ctk.CTkFrame):
         self.db = db
         self.on_change_callback = on_change_callback
         self.selected_trans_id: Optional[int] = None
+        self.last_receipt: Optional[str] = None
 
         self._create_widgets()
         self.refresh()
@@ -84,16 +90,28 @@ class TransactionsView(ctk.CTkFrame):
         )
         self.book_preview_badge.pack(fill="x", padx=16, pady=(0, 8))
 
-        # Patron Name
+        # Patron Name + Live Merit Check
         ctk.CTkLabel(issue_card, text="Customer Name *", font=FONT_BODY_BOLD, anchor="w").pack(fill="x", padx=16, pady=(4, 2))
         self.cust_name_entry = ctk.CTkEntry(
             issue_card,
-            placeholder_text="Full patron name...",
+            placeholder_text="Type patron name...",
             height=34,
             corner_radius=8,
             font=FONT_BODY
         )
-        self.cust_name_entry.pack(fill="x", padx=16, pady=(0, 6))
+        self.cust_name_entry.pack(fill="x", padx=16, pady=(0, 4))
+        self.cust_name_entry.bind("<KeyRelease>", lambda _: self._preview_patron_merit())
+
+        self.patron_merit_badge = ctk.CTkLabel(
+            issue_card,
+            text="Type name to verify Merit & Borrowing limit",
+            font=FONT_SMALL,
+            fg_color=("#F1F5F9", "#27272A"),
+            text_color=("gray40", "gray70"),
+            corner_radius=6,
+            height=28
+        )
+        self.patron_merit_badge.pack(fill="x", padx=16, pady=(0, 8))
 
         # Patron Email
         ctk.CTkLabel(issue_card, text="Customer Email", font=FONT_BODY_BOLD, anchor="w").pack(fill="x", padx=16, pady=(4, 2))
@@ -135,11 +153,11 @@ class TransactionsView(ctk.CTkFrame):
         return_card = ctk.CTkFrame(left_panel, corner_radius=12)
         return_card.grid(row=1, column=0, sticky="nsew")
 
-        ctk.CTkLabel(return_card, text="📥 Return Book & Check In", font=FONT_SUBTITLE).pack(fill="x", padx=16, pady=(14, 6))
+        ctk.CTkLabel(return_card, text="📥 Return & Loan Management", font=FONT_SUBTITLE).pack(fill="x", padx=16, pady=(14, 6))
 
         self.return_info_badge = ctk.CTkLabel(
             return_card,
-            text="Select an active loan from the table to process its return.",
+            text="Select an active loan from the table to process return or renewal.",
             font=FONT_SMALL,
             fg_color=("#EFF6FF", "#1E293B"),
             text_color=("#1D4ED8", "#93C5FD"),
@@ -161,9 +179,14 @@ class TransactionsView(ctk.CTkFrame):
         self.fine_rate_entry.pack(side="left", padx=6)
         ctk.CTkLabel(rate_row, text="₹/day overdue", font=FONT_SMALL, text_color=("gray40", "gray70")).pack(side="left")
 
+        # Action Buttons in Return Card
+        return_btns_row = ctk.CTkFrame(return_card, fg_color="transparent")
+        return_btns_row.pack(fill="x", padx=16, pady=(0, 16))
+        return_btns_row.columnconfigure((0, 1), weight=1)
+
         self.return_btn = ctk.CTkButton(
-            return_card,
-            text="✅ Return Selected Book",
+            return_btns_row,
+            text="✅ Return Book",
             font=FONT_BODY_BOLD,
             fg_color=COLOR_SUCCESS,
             hover_color=COLOR_SUCCESS_HOVER,
@@ -172,7 +195,34 @@ class TransactionsView(ctk.CTkFrame):
             state="disabled",
             command=self._on_return_selected
         )
-        self.return_btn.pack(fill="x", padx=16, pady=(0, 16))
+        self.return_btn.grid(row=0, column=0, padx=(0, 4), pady=4, sticky="ew")
+
+        self.renew_btn = ctk.CTkButton(
+            return_btns_row,
+            text="🔄 Renew (+7d)",
+            font=FONT_BODY_BOLD,
+            fg_color=("#6366F1", "#4F46E5"),
+            hover_color=("#4F46E5", "#4338CA"),
+            height=38,
+            corner_radius=8,
+            state="disabled",
+            command=self._on_renew_selected
+        )
+        self.renew_btn.grid(row=0, column=1, padx=(4, 0), pady=4, sticky="ew")
+
+        self.receipt_btn = ctk.CTkButton(
+            return_card,
+            text="🧾 View Last Digital Receipt",
+            font=FONT_BODY,
+            fg_color=("#F1F5F9", "#27272A"),
+            text_color=("#0F172A", "#F8FAFC"),
+            hover_color=("#E2E8F0", "#3F3F46"),
+            height=32,
+            corner_radius=8,
+            state="disabled",
+            command=self._show_last_receipt
+        )
+        self.receipt_btn.pack(fill="x", padx=16, pady=(0, 14))
 
         # -----------------------------
         # Right Panel: Search, Filters & Transactions Table
@@ -265,12 +315,6 @@ class TransactionsView(ctk.CTkFrame):
             self.tree.heading(col_id, text=heading_text)
             self.tree.column(col_id, width=width, minwidth=40, anchor=align)
 
-        # Tags
-        is_dark = ctk.get_appearance_mode() == "Dark"
-        self.tree.tag_configure("active_ontime", background="#2D2814" if is_dark else "#FEFCE8")
-        self.tree.tag_configure("active_overdue", background="#7F1D1D" if is_dark else "#FEE2E2", foreground="#FCA5A5" if is_dark else "#991B1B")
-        self.tree.tag_configure("returned", background="#18181B" if is_dark else "#FFFFFF")
-
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
         self.tree.bind("<Double-1>", lambda _: self._on_return_selected())
 
@@ -317,8 +361,53 @@ class TransactionsView(ctk.CTkFrame):
                 text_color=("#B45309", "#FDE68A")
             )
 
+    def _preview_patron_merit(self) -> None:
+        name = self.cust_name_entry.get().strip()
+        if not name:
+            self.patron_merit_badge.configure(
+                text="Type name to verify Merit & Borrowing limit",
+                fg_color=("#F1F5F9", "#27272A"),
+                text_color=("gray40", "gray70")
+            )
+            return
+
+        patron = self.db.get_patron_by_name(name)
+        if not patron:
+            self.patron_merit_badge.configure(
+                text="✨ New Member (Will receive initial 100 Merit)",
+                fg_color=("#EFF6FF", "#1E3A8A"),
+                text_color=("#2563EB", "#93C5FD")
+            )
+            return
+
+        merit = patron['MeritScore']
+        tier = get_merit_tier(merit)
+        active = patron['CurrentLoans']
+        max_b = tier['max_books']
+
+        if not tier['can_borrow']:
+            self.patron_merit_badge.configure(
+                text=f"🚫 Suspended ({merit} pts): Borrowing privileges blocked",
+                fg_color=("#FEE2E2", "#7F1D1D"),
+                text_color=("#B91C1C", "#FCA5A5")
+            )
+        elif active >= max_b:
+            self.patron_merit_badge.configure(
+                text=f"⚠️ Limit Reached: {active}/{max_b} loans ({tier['badge']})",
+                fg_color=("#FEF3C7", "#78350F"),
+                text_color=("#B45309", "#FDE68A")
+            )
+        else:
+            self.patron_merit_badge.configure(
+                text=f"⭐ Merit: {merit} ({tier['badge']}) • Loans: {active}/{max_b}",
+                fg_color=("#ECFDF5", "#064E3B"),
+                text_color=("#047857", "#6EE7B7")
+            )
+
     def refresh(self) -> None:
         """Reload transactions from database."""
+        apply_treeview_row_tags(self.tree, "transactions", ctk.get_appearance_mode())
+
         for item in self.tree.get_children():
             self.tree.delete(item)
 
@@ -393,6 +482,9 @@ class TransactionsView(ctk.CTkFrame):
         book = self.db.get_book_by_id(book_id)
         title = book['Title'] if book else f"Book #{book_id}"
 
+        patron = self.db.get_patron_by_name(cust)
+        patron_merit_text = f"• Merit: {patron['MeritScore']} pts" if patron else ""
+
         if status == TRANS_STATUS_ISSUED:
             overdue_days = self.db.calculate_overdue_days(due)
             rate_val = self.fine_rate_entry.get().strip()
@@ -402,38 +494,43 @@ class TransactionsView(ctk.CTkFrame):
             if overdue_days > 0:
                 msg = (
                     f"⚠️ OVERDUE by {overdue_days} days!\n"
-                    f"Book: '{title}' to {cust}\n"
-                    f"Due: {due} | Estimated Fine: ₹{estimated_fine:.2f}"
+                    f"Book: '{title}' to {cust} {patron_merit_text}\n"
+                    f"Due: {due} | Fine: ₹{estimated_fine:.2f} | Penalty: -{overdue_days * 2} Merit"
                 )
                 self.return_info_badge.configure(
                     text=msg,
                     fg_color=("#FEE2E2", "#7F1D1D"),
                     text_color=("#B91C1C", "#FCA5A5")
                 )
+                self.renew_btn.configure(state="disabled")
             else:
-                msg = f"Ready to Return:\n'{title}' issued to {cust} (Due {due})."
+                msg = f"Ready to Return / Renew:\n'{title}' issued to {cust} (Due {due}) {patron_merit_text}."
                 self.return_info_badge.configure(
                     text=msg,
                     fg_color=("#ECFDF5", "#064E3B"),
                     text_color=("#047857", "#6EE7B7")
                 )
+                self.renew_btn.configure(state="normal")
+
             self.return_btn.configure(state="normal")
         else:
             self.return_info_badge.configure(
-                text=f"Transaction #{t_id} is already returned on {row['ReturnDate']}.\nFine Paid: ₹{row['FineAmount']:.2f}",
+                text=f"Transaction #{t_id} returned on {row['ReturnDate']}.\nFine Paid: ₹{row['FineAmount']:.2f}",
                 fg_color=("#F1F5F9", "#27272A"),
                 text_color=("gray40", "gray70")
             )
             self.return_btn.configure(state="disabled")
+            self.renew_btn.configure(state="disabled")
 
     def _reset_return_card(self) -> None:
         self.selected_trans_id = None
         self.return_info_badge.configure(
-            text="Select an active loan from the table to process its return.",
+            text="Select an active loan from the table to process return or renewal.",
             fg_color=("#EFF6FF", "#1E293B"),
             text_color=("#1D4ED8", "#93C5FD")
         )
         self.return_btn.configure(state="disabled")
+        self.renew_btn.configure(state="disabled")
 
     def _on_issue_book(self) -> None:
         try:
@@ -460,10 +557,31 @@ class TransactionsView(ctk.CTkFrame):
                 loan_days=days
             )
 
+            # Generate digital issue slip
+            slip = (
+                "=========================================\n"
+                "       📚 LIBRARY CIRCULATION SLIP       \n"
+                "=========================================\n"
+                f"Transaction ID : #{result['transaction_id']}\n"
+                f"Date Issued    : {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+                f"Book Title     : {result['book_title']}\n"
+                f"Patron Name    : {result['customer_name']}\n"
+                f"Scheduled Due  : {result['due_date']} ({days} days)\n"
+                "-----------------------------------------\n"
+                f"Patron Merit   : {result['merit_score']} Points\n"
+                f"Standing Tier  : {result['merit_tier']}\n"
+                "=========================================\n"
+                "Please return on or before due date to\n"
+                "earn +5 Merit Points!\n"
+            )
+            self.last_receipt = slip
+            self.receipt_btn.configure(state="normal")
+
             messagebox.showinfo(
                 "Loan Issued Successfully",
                 f"🎉 Book '{result['book_title']}' has been issued to {result['customer_name']}.\n\n"
                 f"Due Date: {result['due_date']} (in {days} days)\n"
+                f"Patron Merit: {result['merit_score']} ({result['merit_tier']})\n"
                 f"Transaction ID: #{result['transaction_id']}"
             )
 
@@ -471,6 +589,7 @@ class TransactionsView(ctk.CTkFrame):
             self.cust_name_entry.delete(0, tk.END)
             self.cust_email_entry.delete(0, tk.END)
             self._preview_book_info()
+            self._preview_patron_merit()
 
             self.refresh()
             self.on_change_callback()
@@ -490,23 +609,84 @@ class TransactionsView(ctk.CTkFrame):
 
             fine = result['fine_amount']
             overdue = result['overdue_days']
+            delta = result['merit_delta']
+            score = result['new_merit_score']
+            tier = result['merit_tier']
+
             if overdue > 0:
-                fine_msg = f"⚠️ Book was overdue by {overdue} days.\nTotal Fine Assessed: ₹{fine:.2f}"
+                fine_msg = f"⚠️ Overdue: {overdue} days late\nFine Assessed: ₹{fine:.2f}\nMerit Deduction: {delta} points"
             else:
-                fine_msg = "✅ Returned on time. No fine incurred."
+                fine_msg = f"✅ On-time Return: No late fine!\nMerit Awarded: +{delta} Points Bonus ⭐"
+
+            # Generate digital return receipt
+            receipt = (
+                "=========================================\n"
+                "       📥 LIBRARY RETURN RECEIPT        \n"
+                "=========================================\n"
+                f"Transaction ID : #{result['transaction_id']}\n"
+                f"Book Title     : {result['book_title']}\n"
+                f"Patron Name    : {result['customer_name']}\n"
+                f"Scheduled Due  : {result['due_date']}\n"
+                f"Actual Return  : {result['return_date']}\n"
+                "-----------------------------------------\n"
+                f"Days Overdue   : {overdue} days\n"
+                f"Late Fine Paid : ₹{fine:.2f}\n"
+                "-----------------------------------------\n"
+                f"Merit Change   : {delta:+d} Points\n"
+                f"New Merit Score: {score} Points\n"
+                f"Merit Standing : {tier}\n"
+                "=========================================\n"
+                "Thank you for returning your library book!\n"
+            )
+            self.last_receipt = receipt
+            self.receipt_btn.configure(state="normal")
 
             messagebox.showinfo(
-                "Return Processed",
+                "Return Processed Successfully",
                 f"Book: '{result['book_title']}'\n"
-                f"Customer: {result['customer_name']}\n"
-                f"Return Date: {result['return_date']}\n\n"
-                f"{fine_msg}"
+                f"Customer: {result['customer_name']}\n\n"
+                f"{fine_msg}\n"
+                f"Current Merit: {score} Points ({tier})"
             )
 
             self.refresh()
             self.on_change_callback()
         except Exception as e:
             messagebox.showerror("Return Failed", str(e))
+
+    def _on_renew_selected(self) -> None:
+        if self.selected_trans_id is None:
+            messagebox.showwarning("Notice", "Please select an active transaction to renew.")
+            return
+
+        try:
+            res = self.db.renew_loan(self.selected_trans_id, additional_days=7)
+            messagebox.showinfo(
+                "Loan Renewed",
+                f"🎉 Loan #{res['transaction_id']} renewed successfully for {res['customer_name']}!\n\n"
+                f"New Due Date: {res['new_due_date']} (+7 days extension)"
+            )
+            self.refresh()
+            self.on_change_callback()
+        except Exception as e:
+            messagebox.showerror("Renewal Failed", str(e))
+
+    def _show_last_receipt(self) -> None:
+        if not self.last_receipt:
+            return
+
+        receipt_win = ctk.CTkToplevel(self)
+        receipt_win.title("🧾 Digital Circulation Receipt")
+        receipt_win.geometry("450x420")
+        receipt_win.transient(self)
+
+        txt = ctk.CTkTextbox(receipt_win, font=FONT_MONO, corner_radius=8)
+        txt.pack(fill="both", expand=True, padx=16, pady=16)
+        txt.insert("1.0", self.last_receipt)
+        txt.configure(state="disabled")
+
+        close_btn = ctk.CTkButton(receipt_win, text="Close Receipt", command=receipt_win.destroy, height=34, corner_radius=8)
+        close_btn.pack(pady=(0, 16))
 
     def _on_export_csv(self) -> None:
         file_path = filedialog.asksaveasfilename(

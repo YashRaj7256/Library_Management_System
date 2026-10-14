@@ -30,14 +30,17 @@ FONT_MONO = ("Consolas", 10)
 
 def configure_treeview_theme(style: ttk.Style, mode: str = "Dark") -> None:
     """Synchronize TTK Treeview styling with CustomTkinter appearance mode."""
+    # Ensure clam theme is used for reliable custom coloring across platforms
+    if "clam" in style.theme_names():
+        style.theme_use("clam")
+
     is_dark = mode.lower() == "dark"
 
     bg_main = "#18181B" if is_dark else "#FFFFFF"
-    fg_main = "#F4F4F5" if is_dark else "#09090B"
-    bg_alt = "#27272A" if is_dark else "#F8FAFC"
-    bg_heading = "#27272A" if is_dark else "#E4E4E7"
-    fg_heading = "#FFFFFF" if is_dark else "#18181B"
-    sel_bg = "#3B82F6" if is_dark else "#BFDBFE"
+    fg_main = "#F4F4F5" if is_dark else "#0F172A"
+    bg_heading = "#27272A" if is_dark else "#E2E8F0"
+    fg_heading = "#FFFFFF" if is_dark else "#0F172A"
+    sel_bg = "#2563EB" if is_dark else "#BFDBFE"
     sel_fg = "#FFFFFF" if is_dark else "#1E3A8A"
 
     style.configure(
@@ -45,7 +48,7 @@ def configure_treeview_theme(style: ttk.Style, mode: str = "Dark") -> None:
         background=bg_main,
         foreground=fg_main,
         fieldbackground=bg_main,
-        rowheight=28,
+        rowheight=30,
         font=FONT_BODY,
         borderwidth=0,
         relief="flat"
@@ -55,12 +58,13 @@ def configure_treeview_theme(style: ttk.Style, mode: str = "Dark") -> None:
         background=bg_heading,
         foreground=fg_heading,
         font=FONT_SECTION,
-        padding=[8, 8],
-        relief="flat"
+        padding=[10, 8],
+        relief="flat",
+        borderwidth=0
     )
     style.map(
         "Treeview.Heading",
-        background=[("active", "#3F3F46" if is_dark else "#D4D4D8")],
+        background=[("active", "#3F3F46" if is_dark else "#CBD5E1")],
         foreground=[("active", fg_heading)]
     )
     style.map(
@@ -68,3 +72,41 @@ def configure_treeview_theme(style: ttk.Style, mode: str = "Dark") -> None:
         background=[("selected", sel_bg)],
         foreground=[("selected", sel_fg)]
     )
+
+
+def apply_treeview_row_tags(tree: ttk.Treeview, view_type: str = "books", mode: str = "Dark") -> None:
+    """Dynamically configure row tag colors based on current appearance mode."""
+    is_dark = mode.lower() == "dark"
+
+    if view_type == "books":
+        tree.tag_configure(
+            "evenrow",
+            background="#18181B" if is_dark else "#FFFFFF",
+            foreground="#F4F4F5" if is_dark else "#0F172A"
+        )
+        tree.tag_configure(
+            "oddrow",
+            background="#27272A" if is_dark else "#F8FAFC",
+            foreground="#F4F4F5" if is_dark else "#0F172A"
+        )
+        tree.tag_configure(
+            "unavailable",
+            background="#7F1D1D" if is_dark else "#FEE2E2",
+            foreground="#FCA5A5" if is_dark else "#991B1B"
+        )
+    elif view_type == "transactions":
+        tree.tag_configure(
+            "returned",
+            background="#18181B" if is_dark else "#FFFFFF",
+            foreground="#F4F4F5" if is_dark else "#0F172A"
+        )
+        tree.tag_configure(
+            "active_ontime",
+            background="#2E2A14" if is_dark else "#FEFCE8",
+            foreground="#FDE68A" if is_dark else "#854D0E"
+        )
+        tree.tag_configure(
+            "active_overdue",
+            background="#7F1D1D" if is_dark else "#FEE2E2",
+            foreground="#FCA5A5" if is_dark else "#991B1B"
+        )

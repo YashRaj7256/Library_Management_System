@@ -22,6 +22,7 @@ from .styles import (
     FONT_SECTION,
     FONT_SMALL,
     FONT_SUBTITLE,
+    apply_treeview_row_tags,
 )
 
 
@@ -290,11 +291,6 @@ class BooksView(ctk.CTkFrame):
             self.tree.heading(col_id, text=heading_text, command=lambda c=col_id: self._sort_by_column(c))
             self.tree.column(col_id, width=width, minwidth=40, anchor=align)
 
-        # Tags
-        self.tree.tag_configure("evenrow", background="#18181B" if ctk.get_appearance_mode() == "Dark" else "#FFFFFF")
-        self.tree.tag_configure("oddrow", background="#27272A" if ctk.get_appearance_mode() == "Dark" else "#F8FAFC")
-        self.tree.tag_configure("unavailable", background="#7F1D1D" if ctk.get_appearance_mode() == "Dark" else "#FEE2E2", foreground="#FCA5A5" if ctk.get_appearance_mode() == "Dark" else "#991B1B")
-
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
         self.tree.bind("<Double-1>", self._on_double_click)
 
@@ -324,6 +320,9 @@ class BooksView(ctk.CTkFrame):
 
     def refresh(self) -> None:
         """Reload books table respecting search, filter, and sort."""
+        # Dynamically apply tag colors for current mode (Light/Dark)
+        apply_treeview_row_tags(self.tree, "books", ctk.get_appearance_mode())
+
         for item in self.tree.get_children():
             self.tree.delete(item)
 

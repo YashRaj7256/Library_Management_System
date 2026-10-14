@@ -9,6 +9,7 @@ import customtkinter as ctk
 from ..database import LibraryDatabase
 from .analytics_view import AnalyticsView
 from .books_view import BooksView
+from .patrons_view import PatronsView
 from .styles import (
     COLOR_PRIMARY,
     COLOR_PRIMARY_HOVER,
@@ -90,6 +91,7 @@ class LibraryApp:
         nav_items = [
             ("books", "📚  Books Catalog"),
             ("loans", "🔄  Circulation & Loans"),
+            ("patrons", "👥  Members & Merit"),
             ("analytics", "📊  Visual Analytics"),
         ]
 
@@ -205,6 +207,7 @@ class LibraryApp:
         self.views = {
             "books": BooksView(self.content_area, self.db, on_change_callback=self.on_data_change),
             "loans": TransactionsView(self.content_area, self.db, on_change_callback=self.on_data_change),
+            "patrons": PatronsView(self.content_area, self.db, on_change_callback=self.on_data_change),
             "analytics": AnalyticsView(self.content_area, self.db, on_change_callback=self.on_data_change),
         }
 
@@ -247,6 +250,7 @@ class LibraryApp:
         titles = {
             "books": "📚 Books Catalog Management",
             "loans": "🔄 Circulation & Patron Loans",
+            "patrons": "👥 Member Profiles & Merit Standing",
             "analytics": "📊 Visual Analytics & Intelligence",
         }
         self.view_title_lbl.configure(text=titles.get(view_key, "LibraryOS"))
@@ -309,11 +313,13 @@ class LibraryApp:
             "Pandas, OpenPyXL, and Matplotlib.\n\n"
             "Key Features:\n"
             "• Modern Fluent Design with Dark & Light Mode\n"
-            "• Embedded Matplotlib charts (Donut & Bar charts)\n"
-            "• Complete Catalog CRUD operations (Add, Edit, Delete)\n"
-            "• Automatic overdue tracking & fine calculation (₹5.00/day)\n"
-            "• Instant search and column sorting\n"
-            "• Safe atomic Excel persistence with CSV exports"
+            "• ⭐ User Merit System (Initial 100 Merit, On-Time Rewards, Overdue Penalties)\n"
+            "• 👥 Member Registration & Tier Limits (Gold/Silver/Bronze/Suspended)\n"
+            "• 🔄 Loan Renewals (+7 Days) & Digital Circulation Receipts\n"
+            "• 📊 Embedded Matplotlib charts (Donut & Bar charts)\n"
+            "• 📖 Complete Catalog CRUD operations (Add, Edit, Delete)\n"
+            "• 💰 Automatic Overdue Fine Calculation (₹5.00/day)\n"
+            "• 💾 Safe Multi-Sheet Excel Storage (Books, Transactions, Patrons)"
         )
         messagebox.showinfo("About LibraryOS", msg)
 
