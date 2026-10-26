@@ -120,6 +120,7 @@ class Patron:
     current_loans: int
     status: str
     registered_date: str
+    member_id: str = ""
 
 
 @dataclass
@@ -133,3 +134,4 @@ class Transaction:
     return_date: Optional[str]
     fine_amount: float
     status: str
+    member_id: str = ""

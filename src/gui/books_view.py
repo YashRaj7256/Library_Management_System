@@ -4,7 +4,7 @@ Modern Books Management View built with CustomTkinter.
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, Optional
 import customtkinter as ctk
 
 from ..database import LibraryDatabase
@@ -29,10 +29,17 @@ from .styles import (
 class BooksView(ctk.CTkFrame):
     """Modern view component for catalog CRUD, search, and sorting."""
 
-    def __init__(self, parent, db: LibraryDatabase, on_change_callback: Callable[[], None]):
+    def __init__(
+        self,
+        parent,
+        db: LibraryDatabase,
+        on_change_callback: Callable[[], None],
+        on_issue_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    ):
         super().__init__(parent, fg_color="transparent")
         self.db = db
         self.on_change_callback = on_change_callback
+        self.on_issue_callback = on_issue_callback
         self.selected_book_id: Optional[int] = None
 
         self._create_widgets()
@@ -165,6 +172,19 @@ class BooksView(ctk.CTkFrame):
             command=self.clear_form
         )
         self.clear_btn.grid(row=1, column=1, padx=(4, 0), pady=4, sticky="ew")
+
+        self.issue_btn = ctk.CTkButton(
+            btn_frame,
+            text="🚀 Issue Selected Book",
+            font=FONT_BODY_BOLD,
+            fg_color=("#4F46E5", "#4338CA"),
+            hover_color=("#4338CA", "#3730A3"),
+            height=36,
+            corner_radius=8,
+            state="disabled",
+            command=self._on_issue_selected
+        )
+        self.issue_btn.grid(row=2, column=0, columnspan=2, pady=(4, 0), sticky="ew")
 
         # -----------------------------
         # Right Panel: Search, Filter & Table
@@ -407,6 +427,24 @@ class BooksView(ctk.CTkFrame):
 
         self.update_btn.configure(state="normal")
         self.delete_btn.configure(state="normal")
+        if book['AvailableCopies'] > 0 and self.on_issue_callback is not None:
+            self.issue_btn.configure(state="normal")
+        else:
+            self.issue_btn.configure(state="disabled")
+
+    def _on_issue_selected(self) -> None:
+        if self.selected_book_id is None:
+            messagebox.showwarning("Warning", "Please select a book to issue.")
+            return
+        book = self.db.get_book_by_id(self.selected_book_id)
+        if not book:
+            messagebox.showerror("Error", "Selected book not found.")
+            return
+        if book['AvailableCopies'] <= 0:
+            messagebox.showwarning("Unavailable", f"'{book['Title']}' has no copies currently available to issue.")
+            return
+        if self.on_issue_callback:
+            self.on_issue_callback(book)
 
     def _on_double_click(self, event=None) -> None:
         selection = self.tree.selection()
@@ -446,6 +484,7 @@ class BooksView(ctk.CTkFrame):
 
         self.update_btn.configure(state="disabled")
         self.delete_btn.configure(state="disabled")
+        self.issue_btn.configure(state="disabled")
         self.tree.selection_remove(self.tree.selection())
 
     def _on_add_book(self) -> None:

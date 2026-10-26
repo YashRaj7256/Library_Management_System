@@ -11,6 +11,9 @@ COLOR_PRIMARY_HOVER = "#1D4ED8" # Blue 700
 COLOR_SUCCESS = "#059669"       # Emerald 600
 COLOR_SUCCESS_HOVER = "#047857"
 
+COLOR_UNSAVED = "#EA580C"       # Orange 600
+COLOR_UNSAVED_HOVER = "#C2410C" # Orange 700
+
 COLOR_WARNING = "#D97706"       # Amber 600
 COLOR_DANGER = "#DC2626"        # Red 600
 COLOR_DANGER_HOVER = "#B91C1C"
@@ -94,16 +97,47 @@ def apply_treeview_row_tags(tree: ttk.Treeview, view_type: str = "books", mode: 
             background="#7F1D1D" if is_dark else "#FEE2E2",
             foreground="#FCA5A5" if is_dark else "#991B1B"
         )
-    elif view_type == "transactions":
+    elif view_type in ("transactions", "loans"):
         tree.tag_configure(
             "returned",
+            background="#18181B" if is_dark else "#FFFFFF",
+            foreground="#94A3B8" if is_dark else "#64748B"
+        )
+        tree.tag_configure(
+            "active_ontime",
+            background="#064E3B" if is_dark else "#ECFDF5",
+            foreground="#6EE7B7" if is_dark else "#065F46"
+        )
+        tree.tag_configure(
+            "active_soon",
+            background="#422006" if is_dark else "#FEF3C7",
+            foreground="#FCD34D" if is_dark else "#92400E"
+        )
+        tree.tag_configure(
+            "active_overdue",
+            background="#7F1D1D" if is_dark else "#FEE2E2",
+            foreground="#FCA5A5" if is_dark else "#991B1B"
+        )
+    elif view_type == "history":
+        tree.tag_configure(
+            "evenrow",
             background="#18181B" if is_dark else "#FFFFFF",
             foreground="#F4F4F5" if is_dark else "#0F172A"
         )
         tree.tag_configure(
+            "oddrow",
+            background="#27272A" if is_dark else "#F8FAFC",
+            foreground="#F4F4F5" if is_dark else "#0F172A"
+        )
+        tree.tag_configure(
+            "returned",
+            background="#18181B" if is_dark else "#FFFFFF",
+            foreground="#94A3B8" if is_dark else "#64748B"
+        )
+        tree.tag_configure(
             "active_ontime",
-            background="#2E2A14" if is_dark else "#FEFCE8",
-            foreground="#FDE68A" if is_dark else "#854D0E"
+            background="#064E3B" if is_dark else "#ECFDF5",
+            foreground="#6EE7B7" if is_dark else "#065F46"
         )
         tree.tag_configure(
             "active_overdue",

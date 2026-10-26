@@ -190,5 +190,39 @@ class TestLibraryDatabase(unittest.TestCase):
         self.assertEqual(patron['MeritScore'], 100)
 
 
+    def test_same_name_members_with_distinct_member_ids(self):
+        """Test that two members with the exact same name receive unique Member IDs and distinct loan tracking."""
+        p1_id = self.db.register_patron(name="John Doe", email="john1@example.com")
+        p2_id = self.db.register_patron(name="John Doe", email="john2@example.com")
+
+        p1 = self.db.get_patron_by_id(p1_id)
+        p2 = self.db.get_patron_by_id(p2_id)
+
+        self.assertNotEqual(p1['MemberID'], p2['MemberID'])
+        self.assertTrue(p1['MemberID'].startswith("MEM-"))
+        self.assertTrue(p2['MemberID'].startswith("MEM-"))
+
+        # Issue book to p1 using exact MemberID
+        b_id = self.db.add_book(title="Disambiguation Book", author="Author", total_copies=5)
+        res = self.db.issue_book(book_id=b_id, customer_name="John Doe", member_id=p1['MemberID'])
+        self.assertEqual(res['member_id'], p1['MemberID'])
+
+        # Verify only p1 has active loan, p2 has 0
+        p1_updated = self.db.get_patron_by_member_id(p1['MemberID'])
+        p2_updated = self.db.get_patron_by_member_id(p2['MemberID'])
+        self.assertEqual(p1_updated['CurrentLoans'], 1)
+        self.assertEqual(p2_updated['CurrentLoans'], 0)
+
+        # Return p1's book
+        ret = self.db.return_book(transaction_id=res['transaction_id'])
+        self.assertEqual(ret['member_id'], p1['MemberID'])
+
+        # Merit only awarded to p1
+        p1_final = self.db.get_patron_by_member_id(p1['MemberID'])
+        p2_final = self.db.get_patron_by_member_id(p2['MemberID'])
+        self.assertEqual(p1_final['MeritScore'], 105)
+        self.assertEqual(p2_final['MeritScore'], 100)
+
+
 if __name__ == "__main__":
     unittest.main()

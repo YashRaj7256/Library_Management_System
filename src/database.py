@@ -24,6 +24,17 @@ from .models import (
 )
 
 
+def format_member_id(patron_id: Any) -> str:
+    """Format an ID into a standard Member ID (e.g. 1 -> MEM-1001, 1001 -> MEM-1001)."""
+    try:
+        clean_num = int(re.sub(r"[^\d]", "", str(patron_id)))
+        if clean_num >= 1000:
+            return f"MEM-{clean_num}"
+        return f"MEM-{1000 + clean_num}"
+    except Exception:
+        return f"MEM-{patron_id}"
+
+
 class LibraryDatabase:
     """Manages Excel storage and DataFrames for books, transactions, and patrons."""
 
@@ -83,6 +94,7 @@ class LibraryDatabase:
         transactions_data = {
             'TransactionID': [],
             'BookID': [],
+            'MemberID': [],
             'CustomerName': [],
             'CustomerEmail': [],
             'IssueDate': [],
@@ -93,6 +105,7 @@ class LibraryDatabase:
         }
 
         patrons_data = {
+            'MemberID': ['MEM-1001', 'MEM-1002'],
             'PatronID': [1, 2],
             'Name': ['Alice Johnson', 'Bob Wilson'],
             'Email': ['alice.j@email.com', 'bob.w@email.com'],
@@ -142,7 +155,7 @@ class LibraryDatabase:
                     self.books_df[col] = []
 
             expected_trans_cols = [
-                'TransactionID', 'BookID', 'CustomerName', 'CustomerEmail',
+                'TransactionID', 'BookID', 'MemberID', 'CustomerName', 'CustomerEmail',
                 'IssueDate', 'DueDate', 'ReturnDate', 'FineAmount', 'Status'
             ]
             for col in expected_trans_cols:
@@ -150,7 +163,7 @@ class LibraryDatabase:
                     self.transactions_df[col] = []
 
             expected_patron_cols = [
-                'PatronID', 'Name', 'Email', 'Phone', 'MembershipType',
+                'MemberID', 'PatronID', 'Name', 'Email', 'Phone', 'MembershipType',
                 'MeritScore', 'TotalBorrowed', 'CurrentLoans', 'Status', 'RegisteredDate'
             ]
             for col in expected_patron_cols:
@@ -170,25 +183,20 @@ class LibraryDatabase:
                 self.books_df['Genre'] = self.books_df['Genre'].fillna('Other').astype(str)
                 self.books_df['Status'] = self.books_df['Status'].fillna(STATUS_AVAILABLE).astype(str)
 
-            # Normalize transactions
-            if not self.transactions_df.empty:
-                self.transactions_df['TransactionID'] = pd.to_numeric(self.transactions_df['TransactionID'], errors='coerce').fillna(0).astype(int)
-                self.transactions_df['BookID'] = pd.to_numeric(self.transactions_df['BookID'], errors='coerce').fillna(0).astype(int)
-                self.transactions_df['FineAmount'] = pd.to_numeric(self.transactions_df['FineAmount'], errors='coerce').fillna(0.0).astype(float)
-                self.transactions_df['CustomerName'] = self.transactions_df['CustomerName'].fillna('').astype(str)
-                self.transactions_df['CustomerEmail'] = self.transactions_df['CustomerEmail'].fillna('').astype(str)
-                self.transactions_df['Status'] = self.transactions_df['Status'].fillna(TRANS_STATUS_ISSUED).astype(str)
-                for d_col in ['IssueDate', 'DueDate', 'ReturnDate']:
-                    if d_col in self.transactions_df.columns:
-                        self.transactions_df[d_col] = self.transactions_df[d_col].apply(self._format_date_val)
-
-            # Seed Patrons if empty or not present
+            # Seed Patrons if empty or not present before normalizing transactions
             if self.patrons_df.empty and not self.transactions_df.empty:
                 self._seed_patrons_from_transactions()
 
             # Normalize patrons
             if not self.patrons_df.empty:
                 self.patrons_df['PatronID'] = pd.to_numeric(self.patrons_df['PatronID'], errors='coerce').fillna(0).astype(int)
+                self.patrons_df['MemberID'] = self.patrons_df['MemberID'].fillna('').astype(str)
+                # Auto-generate MemberID for any row missing it
+                for idx, row in self.patrons_df.iterrows():
+                    m_val = str(row['MemberID']).strip()
+                    if not m_val or m_val.lower() == 'nan':
+                        self.patrons_df.at[idx, 'MemberID'] = format_member_id(row['PatronID'])
+
                 self.patrons_df['MeritScore'] = pd.to_numeric(self.patrons_df['MeritScore'], errors='coerce').fillna(INITIAL_MERIT_SCORE).astype(int)
                 self.patrons_df['TotalBorrowed'] = pd.to_numeric(self.patrons_df['TotalBorrowed'], errors='coerce').fillna(0).astype(int)
                 self.patrons_df['CurrentLoans'] = pd.to_numeric(self.patrons_df['CurrentLoans'], errors='coerce').fillna(0).astype(int)
@@ -198,6 +206,33 @@ class LibraryDatabase:
                 self.patrons_df['MembershipType'] = self.patrons_df['MembershipType'].fillna('Student').astype(str)
                 self.patrons_df['Status'] = self.patrons_df['Status'].fillna('Active').astype(str)
                 self.patrons_df['RegisteredDate'] = self.patrons_df['RegisteredDate'].apply(self._format_date_val)
+
+            # Normalize transactions
+            if not self.transactions_df.empty:
+                self.transactions_df['TransactionID'] = pd.to_numeric(self.transactions_df['TransactionID'], errors='coerce').fillna(0).astype(int)
+                self.transactions_df['BookID'] = pd.to_numeric(self.transactions_df['BookID'], errors='coerce').fillna(0).astype(int)
+                self.transactions_df['MemberID'] = self.transactions_df['MemberID'].fillna('').astype(str)
+                self.transactions_df['FineAmount'] = pd.to_numeric(self.transactions_df['FineAmount'], errors='coerce').fillna(0.0).astype(float)
+                self.transactions_df['CustomerName'] = self.transactions_df['CustomerName'].fillna('').astype(str)
+                self.transactions_df['CustomerEmail'] = self.transactions_df['CustomerEmail'].fillna('').astype(str)
+                self.transactions_df['Status'] = self.transactions_df['Status'].fillna(TRANS_STATUS_ISSUED).astype(str)
+
+                # Back-fill MemberID in transactions if missing
+                if not self.patrons_df.empty:
+                    name_to_mem = dict(zip(self.patrons_df['Name'].astype(str).str.lower(), self.patrons_df['MemberID']))
+                    email_to_mem = dict(zip(self.patrons_df['Email'].astype(str).str.lower(), self.patrons_df['MemberID']))
+                    for idx, row in self.transactions_df.iterrows():
+                        curr_m = str(row['MemberID']).strip()
+                        if not curr_m or curr_m.lower() == 'nan':
+                            c_email = str(row['CustomerEmail']).strip().lower()
+                            c_name = str(row['CustomerName']).strip().lower()
+                            resolved_m = email_to_mem.get(c_email) or name_to_mem.get(c_name) or ""
+                            if resolved_m:
+                                self.transactions_df.at[idx, 'MemberID'] = resolved_m
+
+                for d_col in ['IssueDate', 'DueDate', 'ReturnDate']:
+                    if d_col in self.transactions_df.columns:
+                        self.transactions_df[d_col] = self.transactions_df[d_col].apply(self._format_date_val)
 
             self.is_dirty = False
             self.last_saved_time = datetime.now().strftime("%H:%M:%S")
@@ -225,7 +260,10 @@ class LibraryDatabase:
                 (self.transactions_df['Status'] == TRANS_STATUS_ISSUED)
             ])
 
+            member_id = format_member_id(i)
+
             patrons_list.append({
+                'MemberID': member_id,
                 'PatronID': i,
                 'Name': name,
                 'Email': email,
@@ -257,6 +295,9 @@ class LibraryDatabase:
     def save_data(self) -> None:
         """Write current DataFrames to Excel file across all three sheets."""
         try:
+            parent = os.path.dirname(os.path.abspath(self.excel_file))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
             with pd.ExcelWriter(self.excel_file, engine='openpyxl') as writer:
                 self.books_df.to_excel(writer, sheet_name='Books', index=False)
                 self.transactions_df.to_excel(writer, sheet_name='Transactions', index=False)
@@ -276,9 +317,10 @@ class LibraryDatabase:
         email: str = "",
         phone: str = "",
         membership_type: str = "Student",
-        initial_merit: int = INITIAL_MERIT_SCORE
+        initial_merit: int = INITIAL_MERIT_SCORE,
+        custom_member_id: Optional[str] = None
     ) -> int:
-        """Register a new patron with initial merit score (100)."""
+        """Register a new patron with unique Member ID and initial merit score (100)."""
         name = name.strip()
         if not name:
             raise ValueError("Patron name cannot be empty.")
@@ -289,9 +331,17 @@ class LibraryDatabase:
             if not existing.empty:
                 raise ValueError(f"A member with email '{email}' is already registered.")
 
-        new_id = (self.patrons_df['PatronID'].max() + 1) if not self.patrons_df.empty else 1
+        new_id = int((self.patrons_df['PatronID'].max() + 1) if not self.patrons_df.empty else 1)
+        member_id = custom_member_id.strip().upper() if custom_member_id and custom_member_id.strip() else format_member_id(new_id)
+
+        # Check for duplicate Member ID
+        if not self.patrons_df.empty and 'MemberID' in self.patrons_df.columns:
+            if member_id in self.patrons_df['MemberID'].astype(str).str.upper().values:
+                # If custom or generated collided, bump numeric suffix
+                member_id = f"MEM-{1000 + new_id}"
 
         new_patron = {
+            'MemberID': member_id,
             'PatronID': int(new_id),
             'Name': name,
             'Email': email.strip(),
@@ -312,6 +362,21 @@ class LibraryDatabase:
 
         self.is_dirty = True
         return int(new_id)
+
+    def get_next_member_id(self) -> str:
+        """Return the next auto-generated Member ID string (e.g. MEM-1003)."""
+        new_id = (self.patrons_df['PatronID'].max() + 1) if not self.patrons_df.empty else 1
+        return format_member_id(new_id)
+
+    def get_patron_by_member_id(self, member_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve patron dictionary by exact Member ID (e.g. 'MEM-1001')."""
+        if self.patrons_df.empty or not member_id:
+            return None
+        m_id = str(member_id).strip().upper()
+        match = self.patrons_df[self.patrons_df['MemberID'].astype(str).str.upper() == m_id]
+        if match.empty:
+            return None
+        return match.iloc[0].to_dict()
 
     def update_patron(
         self,
@@ -344,18 +409,44 @@ class LibraryDatabase:
         self.is_dirty = True
         return True
 
-    def get_patron_by_id(self, patron_id: int) -> Optional[Dict[str, Any]]:
-        """Retrieve patron dictionary by PatronID."""
-        match = self.patrons_df[self.patrons_df['PatronID'] == patron_id]
-        if match.empty:
+    def get_patron_by_id(self, identifier: Any) -> Optional[Dict[str, Any]]:
+        """Retrieve patron dictionary by PatronID (int) or MemberID (str)."""
+        if self.patrons_df.empty or identifier is None:
             return None
-        return match.iloc[0].to_dict()
+
+        # Check if string MemberID like 'MEM-1001'
+        if isinstance(identifier, str):
+            clean_str = identifier.strip().upper()
+            if clean_str.startswith("MEM-"):
+                return self.get_patron_by_member_id(clean_str)
+            try:
+                numeric_id = int(clean_str)
+                match = self.patrons_df[self.patrons_df['PatronID'] == numeric_id]
+                if not match.empty:
+                    return match.iloc[0].to_dict()
+            except ValueError:
+                pass
+            return self.get_patron_by_member_id(clean_str)
+
+        try:
+            numeric_id = int(identifier)
+            match = self.patrons_df[self.patrons_df['PatronID'] == numeric_id]
+            if not match.empty:
+                return match.iloc[0].to_dict()
+        except (ValueError, TypeError):
+            pass
+        return None
 
     def get_patron_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """Find patron by name (case-insensitive)."""
+        """Find patron by name (case-insensitive) or Member ID."""
         if self.patrons_df.empty or not name:
             return None
-        match = self.patrons_df[self.patrons_df['Name'].str.lower() == name.strip().lower()]
+        term = name.strip()
+        if term.upper().startswith("MEM-"):
+            by_mem = self.get_patron_by_member_id(term)
+            if by_mem:
+                return by_mem
+        match = self.patrons_df[self.patrons_df['Name'].str.lower() == term.lower()]
         if match.empty:
             return None
         return match.iloc[0].to_dict()
@@ -380,6 +471,7 @@ class LibraryDatabase:
             term = str(search_query).strip().lower()
             if term:
                 mask = (
+                    df['MemberID'].astype(str).str.lower().str.contains(term, na=False) |
                     df['Name'].astype(str).str.lower().str.contains(term, na=False) |
                     df['Email'].astype(str).str.lower().str.contains(term, na=False) |
                     df['Phone'].astype(str).str.contains(term, na=False) |
@@ -590,15 +682,18 @@ class LibraryDatabase:
         book_id: int,
         customer_name: str,
         customer_email: str = "",
+        member_id: Optional[str] = None,
+        patron_id: Optional[int] = None,
         loan_days: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Issue a book to a customer, validating Merit Score and borrowing limits.
+        Uses exact Member ID to avoid ambiguity when patrons share the same name.
         Automatically registers new patrons with 100 merit if not present.
         """
         customer_name = customer_name.strip()
-        if not customer_name:
-            raise ValueError("Customer name is required.")
+        if not customer_name and not member_id:
+            raise ValueError("Customer name or Member ID is required.")
 
         # 1. Validate Book
         idx = self.books_df.index[self.books_df['BookID'] == book_id].tolist()
@@ -610,25 +705,38 @@ class LibraryDatabase:
         if avail <= 0:
             raise ValueError(f"Book '{self.books_df.at[row_idx, 'Title']}' has 0 available copies.")
 
-        # 2. Lookup or Auto-register Patron & Check Merit
-        patron = self.get_patron_by_name(customer_name)
+        # 2. Lookup Patron (prioritizing Member ID/Patron ID over Name)
+        patron = None
+        if member_id:
+            patron = self.get_patron_by_member_id(member_id)
+        elif patron_id is not None:
+            patron = self.get_patron_by_id(patron_id)
+        elif customer_name.upper().startswith("MEM-"):
+            patron = self.get_patron_by_member_id(customer_name)
+
+        if not patron and customer_name:
+            patron = self.get_patron_by_name(customer_name)
+
         if not patron:
             # Auto-register with initial 100 merit
-            p_id = self.register_patron(name=customer_name, email=customer_email, initial_merit=INITIAL_MERIT_SCORE)
+            reg_name = customer_name or f"Member {member_id}"
+            p_id = self.register_patron(name=reg_name, email=customer_email, initial_merit=INITIAL_MERIT_SCORE)
             patron = self.get_patron_by_id(p_id)
 
+        customer_name = patron['Name']
+        patron_member_id = patron['MemberID']
         merit_score = patron['MeritScore']
         tier_info = get_merit_tier(merit_score)
 
         if not tier_info['can_borrow']:
             raise ValueError(
-                f"Borrowing Blocked: Member '{customer_name}' has {merit_score} merit points ({tier_info['badge']}). "
+                f"Borrowing Blocked: Member '{customer_name}' ({patron_member_id}) has {merit_score} merit points ({tier_info['badge']}). "
                 "Borrowing privileges are suspended until overdue fines are cleared."
             )
 
         if patron['CurrentLoans'] >= tier_info['max_books']:
             raise ValueError(
-                f"Borrowing Limit Reached: Patron currently has {patron['CurrentLoans']} active loans. "
+                f"Borrowing Limit Reached: Patron {patron_member_id} currently has {patron['CurrentLoans']} active loans. "
                 f"Their tier ({tier_info['badge']}) permits a maximum of {tier_info['max_books']} concurrent loans."
             )
 
@@ -650,8 +758,9 @@ class LibraryDatabase:
         new_trans = {
             'TransactionID': int(new_trans_id),
             'BookID': int(book_id),
+            'MemberID': str(patron_member_id),
             'CustomerName': customer_name,
-            'CustomerEmail': customer_email.strip() or patron['Email'],
+            'CustomerEmail': customer_email.strip() or str(patron['Email']),
             'IssueDate': issue_dt.strftime("%Y-%m-%d"),
             'DueDate': due_dt.strftime("%Y-%m-%d"),
             'ReturnDate': '',
@@ -675,6 +784,7 @@ class LibraryDatabase:
         return {
             'transaction_id': new_trans_id,
             'book_title': self.books_df.at[row_idx, 'Title'],
+            'member_id': patron_member_id,
             'customer_name': customer_name,
             'due_date': due_dt.strftime("%Y-%m-%d"),
             'merit_score': merit_score,
@@ -685,11 +795,13 @@ class LibraryDatabase:
         self,
         transaction_id: Optional[int] = None,
         book_id: Optional[int] = None,
+        member_id: Optional[str] = None,
         customer_name: Optional[str] = None,
         fine_per_day: float = DEFAULT_FINE_PER_DAY
     ) -> Dict[str, Any]:
         """
         Return an issued book, calculate overdue fine, and update User Merit score.
+        Uses Member ID to identify the exact member when multiple patrons share a name.
         On-time: +5 bonus merit. Overdue: -2 merit/day late.
         """
         if self.transactions_df.empty:
@@ -707,7 +819,9 @@ class LibraryDatabase:
                 raise ValueError(f"No active loan found for Transaction ID {transaction_id}.")
         elif book_id is not None:
             query = (self.transactions_df['BookID'] == book_id) & (self.transactions_df['Status'] == TRANS_STATUS_ISSUED)
-            if customer_name and customer_name.strip():
+            if member_id and member_id.strip():
+                query = query & (self.transactions_df['MemberID'].astype(str).str.upper() == member_id.strip().upper())
+            elif customer_name and customer_name.strip():
                 query = query & (self.transactions_df['CustomerName'].str.lower() == customer_name.strip().lower())
             matches = self.transactions_df.index[query].tolist()
             if matches:
@@ -720,6 +834,7 @@ class LibraryDatabase:
         actual_trans_id = int(self.transactions_df.at[trans_idx, 'TransactionID'])
         b_id = int(self.transactions_df.at[trans_idx, 'BookID'])
         cust_name = str(self.transactions_df.at[trans_idx, 'CustomerName'])
+        trans_member_id = str(self.transactions_df.at[trans_idx, 'MemberID']) if 'MemberID' in self.transactions_df.columns else ""
         due_date_str = str(self.transactions_df.at[trans_idx, 'DueDate'])
         today_str = datetime.now().strftime("%Y-%m-%d")
 
@@ -741,8 +856,15 @@ class LibraryDatabase:
             self.books_df.at[b_row, 'AvailableCopies'] += 1
             self.books_df.at[b_row, 'Status'] = STATUS_AVAILABLE
 
-        # Adjust Patron Merit
-        patron = self.get_patron_by_name(cust_name)
+        # Adjust Patron Merit with exact MemberID match
+        patron = None
+        if trans_member_id and trans_member_id.strip():
+            patron = self.get_patron_by_member_id(trans_member_id)
+        if not patron and member_id:
+            patron = self.get_patron_by_member_id(member_id)
+        if not patron:
+            patron = self.get_patron_by_name(cust_name)
+
         merit_delta = 0
         new_merit = INITIAL_MERIT_SCORE
         tier_badge = "🥈 Silver Standard"
@@ -765,6 +887,7 @@ class LibraryDatabase:
             'transaction_id': actual_trans_id,
             'book_id': b_id,
             'book_title': book_title,
+            'member_id': trans_member_id or (patron['MemberID'] if patron else ""),
             'customer_name': cust_name,
             'due_date': due_date_str,
             'return_date': today_str,
@@ -849,6 +972,7 @@ class LibraryDatabase:
             term = str(search_query).strip().lower()
             if term:
                 mask = (
+                    df['MemberID'].astype(str).str.lower().str.contains(term, na=False) |
                     df['CustomerName'].astype(str).str.lower().str.contains(term, na=False) |
                     df['CustomerEmail'].astype(str).str.lower().str.contains(term, na=False) |
                     df['BookTitle'].astype(str).str.lower().str.contains(term, na=False) |

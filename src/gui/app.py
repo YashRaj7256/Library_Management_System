@@ -9,12 +9,15 @@ import customtkinter as ctk
 from ..database import LibraryDatabase
 from .analytics_view import AnalyticsView
 from .books_view import BooksView
+from .history_view import HistoryView
 from .patrons_view import PatronsView
 from .styles import (
     COLOR_PRIMARY,
     COLOR_PRIMARY_HOVER,
     COLOR_SUCCESS,
     COLOR_SUCCESS_HOVER,
+    COLOR_UNSAVED,
+    COLOR_UNSAVED_HOVER,
     FONT_BODY,
     FONT_BODY_BOLD,
     FONT_HEADING,
@@ -65,7 +68,7 @@ class LibraryApp:
         # -----------------------------
         self.sidebar = ctk.CTkFrame(self.root, width=240, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(5, weight=1)
+        self.sidebar.grid_rowconfigure(6, weight=1)
 
         # App Branding
         brand_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
@@ -90,7 +93,8 @@ class LibraryApp:
         self.nav_btns = {}
         nav_items = [
             ("books", "📚  Books Catalog"),
-            ("loans", "🔄  Circulation & Loans"),
+            ("loans", "🔄  Circulation Desk"),
+            ("history", "📜  Transaction History"),
             ("patrons", "👥  Members & Merit"),
             ("analytics", "📊  Visual Analytics"),
         ]
@@ -111,11 +115,11 @@ class LibraryApp:
             btn.grid(row=i, column=0, padx=14, pady=4, sticky="ew")
             self.nav_btns[key] = btn
 
-        # Spacer in row 5
+        # Spacer in row 6
 
         # Appearance & Theme Controls at bottom of sidebar
         settings_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        settings_frame.grid(row=6, column=0, padx=16, pady=16, sticky="ew")
+        settings_frame.grid(row=7, column=0, padx=16, pady=16, sticky="ew")
 
         ctk.CTkLabel(settings_frame, text="Appearance Mode:", font=FONT_SMALL, text_color=("gray40", "gray70"), anchor="w").pack(fill="x", pady=(0, 4))
         self.appearance_menu = ctk.CTkOptionMenu(
@@ -205,8 +209,23 @@ class LibraryApp:
 
         # Instantiate View Frames
         self.views = {
-            "books": BooksView(self.content_area, self.db, on_change_callback=self.on_data_change),
-            "loans": TransactionsView(self.content_area, self.db, on_change_callback=self.on_data_change),
+            "books": BooksView(
+                self.content_area,
+                self.db,
+                on_change_callback=self.on_data_change,
+                on_issue_callback=self._issue_book_from_catalog
+            ),
+            "loans": TransactionsView(
+                self.content_area,
+                self.db,
+                on_change_callback=self.on_data_change,
+                on_view_history=lambda: self._select_view("history")
+            ),
+            "history": HistoryView(
+                self.content_area,
+                self.db,
+                on_change_callback=self.on_data_change
+            ),
             "patrons": PatronsView(self.content_area, self.db, on_change_callback=self.on_data_change),
             "analytics": AnalyticsView(self.content_area, self.db, on_change_callback=self.on_data_change),
         }
@@ -232,6 +251,11 @@ class LibraryApp:
         )
         self.db_path_lbl.pack(side="right", padx=12)
 
+    def _issue_book_from_catalog(self, book_data: dict) -> None:
+        """Switch to Circulation & Loans view and pre-fill selected book."""
+        self._select_view("loans")
+        self.views["loans"].set_selected_book(book_data)
+
     def _select_view(self, view_key: str) -> None:
         """Switch active view and update sidebar button styling."""
         for key, btn in self.nav_btns.items():
@@ -249,7 +273,8 @@ class LibraryApp:
         # Title map
         titles = {
             "books": "📚 Books Catalog Management",
-            "loans": "🔄 Circulation & Patron Loans",
+            "loans": "🔄 Circulation Desk & Active Loans",
+            "history": "📜 Transaction History & Audit Trail",
             "patrons": "👥 Member Profiles & Merit Standing",
             "analytics": "📊 Visual Analytics & Intelligence",
         }
@@ -281,7 +306,11 @@ class LibraryApp:
             text="⚠️ Unsaved session changes pending. Click 'Save to Excel' or exit to save.",
             text_color=("#D97706", "#FBBF24")
         )
-        self.save_btn.configure(text="💾 Save to Excel *", fg_color="#EA580C")
+        self.save_btn.configure(
+            text="💾 Save to Excel ●",
+            fg_color=COLOR_UNSAVED,
+            hover_color=COLOR_UNSAVED_HOVER
+        )
 
     def save_to_excel(self) -> None:
         """Persist memory DataFrames to the Excel storage."""
@@ -291,7 +320,11 @@ class LibraryApp:
                 text=f"✅ Data saved successfully to Excel at {self.db.last_saved_time}.",
                 text_color=("#059669", "#34D399")
             )
-            self.save_btn.configure(text="💾 Save to Excel", fg_color=COLOR_SUCCESS)
+            self.save_btn.configure(
+                text="💾 Save to Excel",
+                fg_color=COLOR_SUCCESS,
+                hover_color=COLOR_SUCCESS_HOVER
+            )
             messagebox.showinfo("Saved", f"Excel database saved successfully!\n\nFile: {self.db.excel_file}")
         except Exception as e:
             messagebox.showerror("Save Failed", f"Could not write to Excel: {e}")

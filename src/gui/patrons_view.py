@@ -2,6 +2,7 @@
 Modern Patrons and User Merit System View built with CustomTkinter.
 """
 from datetime import datetime
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from typing import Callable, Optional
@@ -84,9 +85,31 @@ class PatronsView(ctk.CTkFrame):
         self.email_entry = ctk.CTkEntry(form_scroll, placeholder_text="patron@university.edu...", height=34, corner_radius=8, font=FONT_BODY)
         self.email_entry.pack(fill="x", pady=(0, 6))
 
-        ctk.CTkLabel(form_scroll, text="Phone Number", font=FONT_BODY_BOLD, anchor="w").pack(fill="x", pady=(4, 2))
-        self.phone_entry = ctk.CTkEntry(form_scroll, placeholder_text="+91 98765 43210...", height=34, corner_radius=8, font=FONT_BODY)
-        self.phone_entry.pack(fill="x", pady=(0, 6))
+        ctk.CTkLabel(form_scroll, text="Phone Number (10 Digits)", font=FONT_BODY_BOLD, anchor="w").pack(fill="x", pady=(4, 2))
+        phone_row = ctk.CTkFrame(form_scroll, fg_color="transparent")
+        phone_row.pack(fill="x", pady=(0, 6))
+
+        prefix_badge = ctk.CTkLabel(
+            phone_row,
+            text="+91",
+            font=FONT_BODY_BOLD,
+            width=50,
+            height=34,
+            corner_radius=8,
+            fg_color=("#E4E4E7", "#27272A"),
+            text_color=("#18181B", "#F4F4F5")
+        )
+        prefix_badge.pack(side="left", padx=(0, 6))
+
+        self.phone_entry = ctk.CTkEntry(
+            phone_row,
+            placeholder_text="Enter 10 digits (e.g. 9876543210)",
+            height=34,
+            corner_radius=8,
+            font=FONT_BODY
+        )
+        self.phone_entry.pack(side="left", fill="x", expand=True)
+        self.phone_entry.bind("<KeyRelease>", self._on_phone_key_release)
 
         ctk.CTkLabel(form_scroll, text="Membership Type", font=FONT_BODY_BOLD, anchor="w").pack(fill="x", pady=(4, 2))
         self.type_menu = ctk.CTkOptionMenu(form_scroll, values=MEMBERSHIP_TYPES, height=34, corner_radius=8, font=FONT_BODY)
@@ -254,7 +277,7 @@ class PatronsView(ctk.CTkFrame):
         tree_scroll_x = ttk.Scrollbar(table_container, orient="horizontal")
 
         columns = (
-            ("PatronID", "ID", 45, "center"),
+            ("MemberID", "Member ID", 85, "center"),
             ("Name", "Member Name", 160, "w"),
             ("Email", "Email", 170, "w"),
             ("Phone", "Phone", 110, "w"),
@@ -334,6 +357,7 @@ class PatronsView(ctk.CTkFrame):
 
         for _, row in df.iterrows():
             p_id = row['PatronID']
+            m_id = str(row.get('MemberID', f"MEM-{1000 + int(p_id)}"))
             merit = int(row['MeritScore'])
             tier = get_merit_tier(merit)
 
@@ -351,7 +375,7 @@ class PatronsView(ctk.CTkFrame):
                 tk.END,
                 iid=str(p_id),
                 values=(
-                    p_id,
+                    m_id,
                     row['Name'],
                     row['Email'],
                     row['Phone'],
@@ -379,11 +403,12 @@ class PatronsView(ctk.CTkFrame):
             return
 
         self.selected_patron_id = p_id
+        m_id = str(patron.get('MemberID', f"MEM-{1000 + p_id}"))
         merit = patron['MeritScore']
         tier = get_merit_tier(merit)
 
         self.mode_badge.configure(
-            text=f"Editing Member #{p_id} • Merit: {merit} ({tier['badge']})",
+            text=f"Editing Member {m_id} • Merit: {merit} ({tier['badge']})",
             fg_color=("#FEF3C7", "#78350F"),
             text_color=("#92400E", "#FDE68A")
         )
@@ -394,14 +419,37 @@ class PatronsView(ctk.CTkFrame):
         self.email_entry.delete(0, tk.END)
         self.email_entry.insert(0, str(patron['Email']))
 
+        phone_val = str(patron.get('Phone', ''))
+        raw_digits = re.sub(r"\D", "", phone_val)
+        if raw_digits.startswith("91") and len(raw_digits) == 12:
+            raw_digits = raw_digits[2:]
         self.phone_entry.delete(0, tk.END)
-        self.phone_entry.insert(0, str(patron['Phone']))
+        self.phone_entry.insert(0, raw_digits[:10])
 
         if patron['MembershipType'] in MEMBERSHIP_TYPES:
             self.type_menu.set(patron['MembershipType'])
 
         self.update_btn.configure(state="normal")
         self.adjust_merit_btn.configure(state="normal")
+
+    def _on_phone_key_release(self, event=None) -> None:
+        """Strip non-digits and limit input to 10 digits."""
+        val = self.phone_entry.get()
+        if val.startswith("+91"):
+            val = val[3:]
+        digits = re.sub(r"\D", "", val)[:10]
+        if digits != val:
+            self.phone_entry.delete(0, tk.END)
+            self.phone_entry.insert(0, digits)
+
+    def _get_formatted_phone(self) -> str:
+        """Format 10-digit input into standard '+91 XXXXX XXXXX' string."""
+        raw = re.sub(r"\D", "", self.phone_entry.get().strip())
+        if not raw:
+            return ""
+        if len(raw) == 10:
+            return f"+91 {raw[:5]} {raw[5:]}"
+        return f"+91 {raw}"
 
     def _on_double_click(self, event=None) -> None:
         selection = self.tree.selection()
@@ -412,9 +460,10 @@ class PatronsView(ctk.CTkFrame):
         if not patron:
             return
 
+        m_id = str(patron.get('MemberID', f"MEM-{1000 + p_id}"))
         tier = get_merit_tier(patron['MeritScore'])
         info = (
-            f"👤 Member ID: #{patron['PatronID']}\n"
+            f"🆔 Member ID: {m_id}\n"
             f"📛 Name: {patron['Name']}\n"
             f"📧 Email: {patron['Email']}\n"
             f"📞 Phone: {patron['Phone']}\n"
@@ -427,12 +476,13 @@ class PatronsView(ctk.CTkFrame):
             f"📦 Lifetime Loans: {patron['TotalBorrowed']} books\n"
             f"📅 Joined: {patron['RegisteredDate']}"
         )
-        messagebox.showinfo(f"Patron Profile - {patron['Name']}", info)
+        messagebox.showinfo(f"Patron Profile - [{m_id}] {patron['Name']}", info)
 
     def clear_form(self) -> None:
         self.selected_patron_id = None
+        next_m_id = self.db.get_next_member_id()
         self.mode_badge.configure(
-            text="✨ Initial Merit: 100 Points Given",
+            text=f"✨ Register New Member ({next_m_id}) • 100 Initial Merit",
             fg_color=("#ECFDF5", "#064E3B"),
             text_color=("#047857", "#6EE7B7")
         )
@@ -449,12 +499,18 @@ class PatronsView(ctk.CTkFrame):
         try:
             name = self.name_entry.get().strip()
             email = self.email_entry.get().strip()
-            phone = self.phone_entry.get().strip()
+            raw_phone = re.sub(r"\D", "", self.phone_entry.get().strip())
             m_type = self.type_menu.get().strip()
 
             if not name:
                 messagebox.showerror("Validation Error", "Full Name is required.")
                 return
+
+            if raw_phone and len(raw_phone) != 10:
+                messagebox.showerror("Validation Error", "Please enter a valid 10-digit mobile number.")
+                return
+
+            phone = self._get_formatted_phone()
 
             new_id = self.db.register_patron(
                 name=name,
@@ -463,13 +519,18 @@ class PatronsView(ctk.CTkFrame):
                 membership_type=m_type,
                 initial_merit=INITIAL_MERIT_SCORE
             )
+            patron = self.db.get_patron_by_id(new_id)
+            m_id = patron['MemberID'] if patron else f"MEM-{1000 + new_id}"
 
             messagebox.showinfo(
                 "Registration Successful",
-                f"🎉 Member '{name}' registered successfully!\n\n"
-                f"Member ID: #{new_id}\n"
-                f"Initial Merit Awarded: {INITIAL_MERIT_SCORE} Points ⭐\n"
-                f"Borrowing Tier: 🥈 Silver Standard (3 books allowed)"
+                f"🎉 Member registered successfully!\n\n"
+                f"👤 Name: {name}\n"
+                f"🆔 Assigned Member ID: {m_id}\n"
+                f"📞 Phone: {phone or 'Not Provided'}\n"
+                f"⭐ Initial Merit Awarded: {INITIAL_MERIT_SCORE} Points\n"
+                f"🥈 Borrowing Tier: Silver Standard (3 books allowed)\n\n"
+                f"Note: This unique Member ID will distinguish them even if other members share the same name."
             )
 
             self.clear_form()
@@ -486,8 +547,14 @@ class PatronsView(ctk.CTkFrame):
         try:
             name = self.name_entry.get().strip()
             email = self.email_entry.get().strip()
-            phone = self.phone_entry.get().strip()
+            raw_phone = re.sub(r"\D", "", self.phone_entry.get().strip())
             m_type = self.type_menu.get().strip()
+
+            if raw_phone and len(raw_phone) != 10:
+                messagebox.showerror("Validation Error", "Please enter a valid 10-digit mobile number.")
+                return
+
+            phone = self._get_formatted_phone()
 
             self.db.update_patron(
                 patron_id=self.selected_patron_id,
